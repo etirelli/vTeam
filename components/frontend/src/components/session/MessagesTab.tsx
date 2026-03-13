@@ -128,7 +128,6 @@ const MessagesTab: React.FC<MessagesTabProps> = ({ session, streamMessages, chat
       const scrollDelta = container.scrollHeight - prevScrollHeightRef.current;
       container.scrollTop = prevScrollTopRef.current + scrollDelta;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- refs are stable; loadedMessageCount is the intended trigger
   }, [loadedMessageCount]);
 
   useEffect(() => {

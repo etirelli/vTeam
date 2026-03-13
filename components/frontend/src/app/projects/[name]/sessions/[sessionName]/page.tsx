@@ -168,8 +168,6 @@ export default function ProjectSessionDetailPage({
   const [repoChanging, setRepoChanging] = useState(false);
   const [pendingRepo, setPendingRepo] = useState<{ url: string; branch: string; status: "Cloning" } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [userHasInteracted, setUserHasInteracted] = useState(false);
-
   // Left panel visibility and size state (persisted to localStorage)
   const [leftPanelVisible, setLeftPanelVisible] = useState(() => {
     if (typeof window === 'undefined') return true;
@@ -686,11 +684,6 @@ export default function ProjectSessionDetailPage({
   const initializedFromSessionRef = useRef(false);
   const workflowLoadedFromSessionRef = useRef(false);
 
-  // Note: userHasInteracted is only set when:
-  // 1. User explicitly selects a workflow (handleWelcomeWorkflowSelect -> onUserInteraction)
-  // 2. User sends a message (sendChat sets it to true)
-  // It should NOT be set automatically when backend messages arrive
-
   // Load remotes from session annotations (one-time initialization)
   useEffect(() => {
     if (initializedFromSessionRef.current || !session) return;
@@ -770,11 +763,6 @@ export default function ProjectSessionDetailPage({
     if (workflow) {
       workflowManagement.activateWorkflow(workflow, session?.status?.phase);
     }
-  };
-
-  // Handle workflow selection from welcome experience
-  const handleWelcomeWorkflowSelect = (workflowId: string) => {
-    handleWorkflowChange(workflowId);
   };
 
   // Derive agent-level status from session data and messages
@@ -1232,10 +1220,6 @@ export default function ProjectSessionDetailPage({
       if (matchingWorkflow) {
         workflowManagement.setActiveWorkflow(matchingWorkflow.id);
         workflowManagement.setSelectedWorkflow(matchingWorkflow.id);
-        // Mark as interacted for existing sessions with messages
-        if (hasRealMessages) {
-          setUserHasInteracted(true);
-        }
       } else {
         // No matching OOTB workflow found - treat as custom workflow.
         // Restore the full custom workflow details from the session CR
@@ -1247,9 +1231,6 @@ export default function ProjectSessionDetailPage({
           aw.path || ""
         );
         workflowManagement.setActiveWorkflow("custom");
-        if (hasRealMessages) {
-          setUserHasInteracted(true);
-        }
       }
       workflowLoadedFromSessionRef.current = true;
     }
@@ -1387,8 +1368,6 @@ export default function ProjectSessionDetailPage({
     clearDraft();
 
     // Mark user interaction when they send first message
-    setUserHasInteracted(true);
-
     const phase = session?.status?.phase;
 
     // If session is not yet running, queue the message for later
