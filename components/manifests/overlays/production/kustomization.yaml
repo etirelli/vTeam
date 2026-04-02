@@ -25,6 +25,7 @@ components:
 - ../../components/oauth-proxy
 - ../../components/postgresql-rhel
 - ../../components/ambient-api-server-db
+- ../../components/openshift-ai
 
 # Patches for production environment
 patches:
