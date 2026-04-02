@@ -3,7 +3,7 @@ kind: MLflow
 metadata:
   name: mlflow
 spec:
-  replicas: 1
+  replicas: 2
 
   resources:
     requests:
@@ -16,9 +16,6 @@ spec:
   # PostgreSQL connection URI is read from a Secret to keep credentials out of the CR.
   # The Secret must exist in the operator's application namespace (redhat-ods-applications).
   backendStoreUriFrom:
-    name: mlflow-db-credentials
-    key: uri
-  registryStoreUriFrom:
     name: mlflow-db-credentials
     key: uri
 
