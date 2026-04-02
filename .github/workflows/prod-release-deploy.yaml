@@ -398,9 +398,10 @@ jobs:
       - name: Verify mlflow-db-credentials secret exists
         run: |
           if ! oc get secret mlflow-db-credentials -n redhat-ods-applications &>/dev/null; then
-            echo "::warning::Secret mlflow-db-credentials not found in redhat-ods-applications."
-            echo "::warning::Create it before the MLflow instance can connect to PostgreSQL."
-            echo "::warning::See components/manifests/base/mlflow-db-credentials-secret.yaml.example"
+            echo "::error::Secret mlflow-db-credentials not found in redhat-ods-applications."
+            echo "::error::Create it before applying the MLflow resource."
+            echo "::error::See components/manifests/base/mlflow-db-credentials-secret.yaml.example"
+            exit 1
           fi
 
       - name: Deploy MLflow instance
