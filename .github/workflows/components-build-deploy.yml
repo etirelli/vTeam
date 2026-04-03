@@ -235,6 +235,22 @@ jobs:
           oc wait csv "$CSV" -n redhat-ods-operator \
             --for=jsonpath='{.status.phase}'=Succeeded --timeout=600s
 
+      - name: Wait for DataScienceCluster CRD to be available
+        run: |
+          echo "Waiting for DataScienceCluster CRD to be registered..."
+          for i in $(seq 1 60); do
+            if oc get crd datascienceclusters.datasciencecluster.opendatahub.io &>/dev/null; then
+              echo "DataScienceCluster CRD is available"
+              break
+            fi
+            if [ "$i" -eq 60 ]; then
+              echo "::error::DataScienceCluster CRD did not become available within timeout"
+              exit 1
+            fi
+            echo "Attempt $i/60 - CRD not yet available, waiting 10s..."
+            sleep 10
+          done
+
       - name: Apply DSCInitialization and DataScienceCluster
         run: |
           oc apply -f components/manifests/components/openshift-ai/dsci.yaml
@@ -255,6 +271,14 @@ jobs:
             echo "Attempt $i/60 - MLflow CRD not yet available, waiting 10s..."
             sleep 10
           done
+
+      - name: Ensure mlflow database exists in PostgreSQL
+        run: |
+          oc exec -n ambient-code deploy/postgresql -- \
+            psql -U postgres -tAc \
+            "SELECT 1 FROM pg_database WHERE datname = 'mlflow'" | grep -q 1 \
+          || oc exec -n ambient-code deploy/postgresql -- \
+            psql -U postgres -c "CREATE DATABASE mlflow"
 
       - name: Verify mlflow-db-credentials secret exists
         run: |
