@@ -516,7 +516,7 @@ func TestDeleteAmbientVertexSecret_CopiedSecret(t *testing.T) {
 	setupTestClient(secret)
 
 	ctx := context.Background()
-	err := deleteAmbientVertexSecret(ctx, "test-ns")
+	err := deleteAmbientVertexSecret(ctx, "test-ns", "")
 	if err != nil {
 		t.Fatalf("deleteAmbientVertexSecret failed: %v", err)
 	}
@@ -542,7 +542,7 @@ func TestDeleteAmbientVertexSecret_NotCopied(t *testing.T) {
 	setupTestClient(secret)
 
 	ctx := context.Background()
-	err := deleteAmbientVertexSecret(ctx, "test-ns")
+	err := deleteAmbientVertexSecret(ctx, "test-ns", "")
 	if err != nil {
 		t.Fatalf("deleteAmbientVertexSecret failed: %v", err)
 	}
@@ -562,7 +562,7 @@ func TestDeleteAmbientVertexSecret_NotFound(t *testing.T) {
 	setupTestClient()
 
 	ctx := context.Background()
-	err := deleteAmbientVertexSecret(ctx, "test-ns")
+	err := deleteAmbientVertexSecret(ctx, "test-ns", "")
 	if err != nil {
 		t.Errorf("deleteAmbientVertexSecret should not error on non-existent secret: %v", err)
 	}
@@ -582,7 +582,7 @@ func TestDeleteAmbientVertexSecret_NilAnnotations(t *testing.T) {
 	setupTestClient(secret)
 
 	ctx := context.Background()
-	err := deleteAmbientVertexSecret(ctx, "test-ns")
+	err := deleteAmbientVertexSecret(ctx, "test-ns", "")
 	if err != nil {
 		t.Fatalf("deleteAmbientVertexSecret failed: %v", err)
 	}

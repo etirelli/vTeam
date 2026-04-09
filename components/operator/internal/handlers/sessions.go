@@ -299,7 +299,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		// Also cleanup ambient-vertex secret when session is stopped
 		deleteCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		if err := deleteAmbientVertexSecret(deleteCtx, sessionNamespace); err != nil {
+		if err := deleteAmbientVertexSecret(deleteCtx, sessionNamespace, name); err != nil {
 			log.Printf("Warning: Failed to cleanup %s secret from %s: %v", types.AmbientVertexSecretName, sessionNamespace, err)
 			// Continue - session cleanup is still successful
 		}
@@ -307,12 +307,12 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		// Cleanup Langfuse secret when session is stopped
 		// This only deletes secrets copied by the operator (with CopiedFromAnnotation).
 		// The platform-wide ambient-admin-langfuse-secret in the operator namespace is never deleted.
-		if err := deleteAmbientLangfuseSecret(deleteCtx, sessionNamespace); err != nil {
+		if err := deleteAmbientLangfuseSecret(deleteCtx, sessionNamespace, name); err != nil {
 			log.Printf("Warning: Failed to cleanup ambient-admin-langfuse-secret from %s: %v", sessionNamespace, err)
 			// Continue - session cleanup is still successful
 		}
 
-		if err := deleteAmbientMlflowObservabilitySecret(deleteCtx, sessionNamespace); err != nil {
+		if err := deleteAmbientMlflowObservabilitySecret(deleteCtx, sessionNamespace, name); err != nil {
 			log.Printf("Warning: Failed to cleanup ambient-admin-mlflow-observability-secret from %s: %v", sessionNamespace, err)
 		}
 
@@ -2037,7 +2037,7 @@ func deletePodAndPerPodService(namespace, podName, sessionName string) error {
 	// Delete the ambient-vertex secret if it was copied by the operator
 	deleteCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := deleteAmbientVertexSecret(deleteCtx, namespace); err != nil {
+	if err := deleteAmbientVertexSecret(deleteCtx, namespace, sessionName); err != nil {
 		log.Printf("Failed to delete %s secret from %s: %v", types.AmbientVertexSecretName, namespace, err)
 		// Don't return error - this is a non-critical cleanup step
 	}
@@ -2045,12 +2045,12 @@ func deletePodAndPerPodService(namespace, podName, sessionName string) error {
 	// Delete the Langfuse secret if it was copied by the operator
 	// This only deletes secrets copied by the operator (with CopiedFromAnnotation).
 	// The platform-wide ambient-admin-langfuse-secret in the operator namespace is never deleted.
-	if err := deleteAmbientLangfuseSecret(deleteCtx, namespace); err != nil {
+	if err := deleteAmbientLangfuseSecret(deleteCtx, namespace, sessionName); err != nil {
 		log.Printf("Failed to delete ambient-admin-langfuse-secret from %s: %v", namespace, err)
 		// Don't return error - this is a non-critical cleanup step
 	}
 
-	if err := deleteAmbientMlflowObservabilitySecret(deleteCtx, namespace); err != nil {
+	if err := deleteAmbientMlflowObservabilitySecret(deleteCtx, namespace, sessionName); err != nil {
 		log.Printf("Failed to delete ambient-admin-mlflow-observability-secret from %s: %v", namespace, err)
 	}
 
@@ -2175,7 +2175,9 @@ func copySecretToNamespace(ctx context.Context, sourceSecret *corev1.Secret, tar
 
 // deleteAmbientVertexSecret deletes the ambient-vertex secret from a namespace if it was copied
 // and no other active sessions in the namespace still need it.
-func deleteAmbientVertexSecret(ctx context.Context, namespace string) error {
+// excludeSessionName, if non-empty, is omitted when counting Running/Creating/Pending sessions
+// (e.g. the session currently being stopped still reports Running until status is patched).
+func deleteAmbientVertexSecret(ctx context.Context, namespace, excludeSessionName string) error {
 	secret, err := config.K8sClient.CoreV1().Secrets(namespace).Get(ctx, types.AmbientVertexSecretName, v1.GetOptions{})
 	if err != nil {
 		if errors.IsNotFound(err) {
@@ -2202,6 +2204,9 @@ func deleteAmbientVertexSecret(ctx context.Context, namespace string) error {
 
 	activeCount := 0
 	for _, session := range sessions.Items {
+		if excludeSessionName != "" && session.GetName() == excludeSessionName {
+			continue
+		}
 		status, _, _ := unstructured.NestedMap(session.Object, "status")
 		phase := ""
 		if status != nil {
@@ -2231,7 +2236,8 @@ func deleteAmbientVertexSecret(ctx context.Context, namespace string) error {
 
 // deleteAmbientLangfuseSecret deletes the ambient-admin-langfuse-secret from a namespace if it was copied
 // and no other active sessions in the namespace still need it.
-func deleteAmbientLangfuseSecret(ctx context.Context, namespace string) error {
+// excludeSessionName, if non-empty, is omitted when counting active sessions (see deleteAmbientVertexSecret).
+func deleteAmbientLangfuseSecret(ctx context.Context, namespace, excludeSessionName string) error {
 	const langfuseSecretName = "ambient-admin-langfuse-secret"
 	secret, err := config.K8sClient.CoreV1().Secrets(namespace).Get(ctx, langfuseSecretName, v1.GetOptions{})
 	if err != nil {
@@ -2259,6 +2265,9 @@ func deleteAmbientLangfuseSecret(ctx context.Context, namespace string) error {
 
 	activeCount := 0
 	for _, session := range sessions.Items {
+		if excludeSessionName != "" && session.GetName() == excludeSessionName {
+			continue
+		}
 		status, _, _ := unstructured.NestedMap(session.Object, "status")
 		phase := ""
 		if status != nil {
@@ -2288,7 +2297,8 @@ func deleteAmbientLangfuseSecret(ctx context.Context, namespace string) error {
 
 // deleteAmbientMlflowObservabilitySecret deletes the copied MLflow observability secret from a
 // session namespace when no other active sessions need it (same rules as Langfuse secret).
-func deleteAmbientMlflowObservabilitySecret(ctx context.Context, namespace string) error {
+// excludeSessionName, if non-empty, is omitted when counting active sessions (see deleteAmbientVertexSecret).
+func deleteAmbientMlflowObservabilitySecret(ctx context.Context, namespace, excludeSessionName string) error {
 	const mlflowObsSecretName = "ambient-admin-mlflow-observability-secret"
 	secret, err := config.K8sClient.CoreV1().Secrets(namespace).Get(ctx, mlflowObsSecretName, v1.GetOptions{})
 	if err != nil {
@@ -2312,6 +2322,9 @@ func deleteAmbientMlflowObservabilitySecret(ctx context.Context, namespace strin
 
 	activeCount := 0
 	for _, session := range sessions.Items {
+		if excludeSessionName != "" && session.GetName() == excludeSessionName {
+			continue
+		}
 		status, _, _ := unstructured.NestedMap(session.Object, "status")
 		phase := ""
 		if status != nil {
