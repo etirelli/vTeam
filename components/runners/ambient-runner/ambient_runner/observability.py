@@ -350,13 +350,19 @@ class ObservabilityManager:
 
     @staticmethod
     def _extract_assistant_text(message: Any) -> str:
-        from claude_agent_sdk import TextBlock
+        """Extract assistant text from a Claude SDK message (or best-effort without SDK)."""
+        try:
+            from claude_agent_sdk import TextBlock
+        except ImportError:
+            TextBlock = None  # type: ignore[misc,assignment]
 
-        text_content = []
+        text_content: list[str] = []
         message_content = getattr(message, "content", []) or []
         for blk in message_content:
-            if isinstance(blk, TextBlock):
+            if TextBlock is not None and isinstance(blk, TextBlock):
                 text_content.append(getattr(blk, "text", ""))
+            elif hasattr(blk, "text"):
+                text_content.append(str(getattr(blk, "text", "")))
         return "\n".join(text_content) if text_content else "(no text output)"
 
     def start_turn(self, model: str, user_input: str | None = None) -> None:
