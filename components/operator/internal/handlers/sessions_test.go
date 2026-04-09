@@ -596,3 +596,50 @@ func TestDeleteAmbientVertexSecret_NilAnnotations(t *testing.T) {
 		t.Error("Secret should still exist")
 	}
 }
+
+func TestReplaceOrAppendEnvVarsPreservesValueFrom(t *testing.T) {
+	secretRef := &corev1.EnvVarSource{
+		SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "ambient-admin-mlflow-observability-secret"},
+			Key:                  "MLFLOW_TRACKING_URI",
+			Optional:             boolPtr(true),
+		},
+	}
+	base := []corev1.EnvVar{
+		{Name: "MLFLOW_TRACKING_URI", ValueFrom: secretRef},
+		{Name: "USER_PROVIDED", Value: "keep-me"},
+	}
+	extra := []corev1.EnvVar{
+		{Name: "MLFLOW_TRACKING_URI", Value: "https://evil.example/mlflow"},
+		{Name: "USER_PROVIDED", Value: "replaced"},
+		{Name: "ONLY_IN_EXTRA", Value: "appended"},
+	}
+
+	out := replaceOrAppendEnvVars(base, extra)
+
+	var tracking *corev1.EnvVar
+	var user *corev1.EnvVar
+	var only *corev1.EnvVar
+	for i := range out {
+		switch out[i].Name {
+		case "MLFLOW_TRACKING_URI":
+			tracking = &out[i]
+		case "USER_PROVIDED":
+			user = &out[i]
+		case "ONLY_IN_EXTRA":
+			only = &out[i]
+		}
+	}
+	if tracking == nil || tracking.ValueFrom == nil || tracking.ValueFrom.SecretKeyRef == nil {
+		t.Fatalf("MLFLOW_TRACKING_URI should still use SecretKeyRef, got %+v", tracking)
+	}
+	if tracking.Value != "" {
+		t.Errorf("MLFLOW_TRACKING_URI Value should not be set, got %q", tracking.Value)
+	}
+	if user == nil || user.Value != "replaced" {
+		t.Errorf("USER_PROVIDED should be replaced by extra, got %+v", user)
+	}
+	if only == nil || only.Value != "appended" {
+		t.Errorf("ONLY_IN_EXTRA should be appended, got %+v", only)
+	}
+}

@@ -1587,23 +1587,23 @@ func appendNonConflictingEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []
 // replaceOrAppendEnvVars merges extra into base: replaces existing entries by name,
 // or appends if the name does not exist. Used for the runner container where
 // user-provided overrides are intentional.
-// Env vars backed by ValueFrom (e.g. SecretKeyRef) are never overwritten — this
-// prevents user-supplied spec.environmentVariables from hijacking platform-managed
-// secrets (Langfuse, MLflow, etc.).
+// Entries in base that use ValueFrom (e.g. SecretKeyRef from the operator) are never
+// replaced or cleared so spec.environmentVariables cannot override platform-injected secrets.
 func replaceOrAppendEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []corev1.EnvVar {
 	for _, ev := range extra {
 		replaced := false
 		for i := range base {
-			if base[i].Name == ev.Name {
-				if base[i].ValueFrom != nil {
-					// Platform-managed secret ref — do not allow override.
-					replaced = true
-					break
-				}
-				base[i].Value = ev.Value
+			if base[i].Name != ev.Name {
+				continue
+			}
+			if base[i].ValueFrom != nil {
 				replaced = true
 				break
 			}
+			base[i].Value = ev.Value
+			base[i].ValueFrom = ev.ValueFrom
+			replaced = true
+			break
 		}
 		if !replaced {
 			base = append(base, ev)
