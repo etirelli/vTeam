@@ -18,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from ambient_runner.observability import _privacy_masking_function
 from ambient_runner.observability_privacy import (
     privacy_mask_message_data,
-    privacy_mask_message_data_strict,
     resolve_message_mask_fn,
 )
 
@@ -225,34 +224,7 @@ def test_real_world_trace():
     assert masked["metadata"]["namespace"] == "prod-namespace"
 
 
-def test_strict_redacts_short_top_level_strings():
-    """LANGFUSE_MASK_MESSAGES=strict path redacts short strings (legacy does not)."""
-    assert privacy_mask_message_data_strict("error") == "[REDACTED FOR PRIVACY]"
-    assert privacy_mask_message_data_strict("") == ""
-
-
-def test_strict_redacts_strings_inside_metadata():
-    """Strict mode recurses into metadata; legacy leaves metadata unchanged."""
-    payload = {
-        "metadata": {
-            "turn": 1,
-            "session_id": "s-1",
-            "namespace": "prod-namespace",
-        }
-    }
-    masked = privacy_mask_message_data_strict(payload)
-    assert masked["metadata"]["turn"] == 1
-    assert masked["metadata"]["session_id"] == "s-1"
-    assert masked["metadata"]["namespace"] == "[REDACTED FOR PRIVACY]"
-
-
-def test_resolve_message_mask_fn_selects_strict(monkeypatch):
-    monkeypatch.setenv("LANGFUSE_MASK_MESSAGES", "strict")
-    fn = resolve_message_mask_fn()
-    assert fn is privacy_mask_message_data_strict
-
-
-def test_resolve_message_mask_fn_selects_legacy(monkeypatch):
+def test_resolve_message_mask_fn_returns_mask_when_true(monkeypatch):
     monkeypatch.setenv("LANGFUSE_MASK_MESSAGES", "true")
     fn = resolve_message_mask_fn()
     assert fn is privacy_mask_message_data
@@ -277,10 +249,7 @@ if __name__ == "__main__":
         ("Primitive types", test_primitive_types),
         ("Empty structures", test_empty_structures),
         ("Real-world trace", test_real_world_trace),
-        ("Strict short strings", test_strict_redacts_short_top_level_strings),
-        ("Strict metadata recurse", test_strict_redacts_strings_inside_metadata),
     ]
-    # resolve_message_mask_fn tests need pytest monkeypatch; skip in __main__ script mode
 
     passed = 0
     failed = 0

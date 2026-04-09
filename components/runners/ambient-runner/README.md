@@ -134,7 +134,7 @@ The workspace context prompt is built by `build_sdk_system_prompt()` in `prompts
 - `LANGFUSE_PUBLIC_KEY` - Langfuse public key
 - `LANGFUSE_SECRET_KEY` - Langfuse secret key
 - `LANGFUSE_HOST` - Langfuse host URL
-- `LANGFUSE_MASK_MESSAGES` - Message redaction for Langfuse and MLflow: `true` (default) uses the **legacy** heuristic (redact strings longer than 50 characters; `metadata` on payloads is not recursively scrubbed—same as pre–dual-backend Langfuse). Set to **`strict`** to redact all non-empty strings and recurse into `metadata`. `false` / `0` / `no` disables masking.
+- `LANGFUSE_MASK_MESSAGES` - Redact message bodies (`true` default; shared with MLflow path)
 
 **Backend selection**
 
