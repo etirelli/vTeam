@@ -884,11 +884,19 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	}
 
 	// Create the Pod directly (no Job wrapper for faster startup)
+	runnerSATokenAutomount := false
+	var runnerPodSAName string
+	if ambientMlflowObsSecretCopied {
+		// MLflow MLFLOW_TRACKING_AUTH=kubernetes-namespaced reads token + namespace from
+		// /var/run/secrets/kubernetes.io/serviceaccount/ (requires automount + session SA).
+		runnerSATokenAutomount = true
+		runnerPodSAName = fmt.Sprintf("ambient-session-%s", name)
+	}
 	podSpec := corev1.PodSpec{
 		RestartPolicy:                 corev1.RestartPolicyNever,
 		TerminationGracePeriodSeconds: &terminationGrace,
-		// Explicitly set service account for pod creation permissions
-		AutomountServiceAccountToken: boolPtr(false),
+		ServiceAccountName:            runnerPodSAName,
+		AutomountServiceAccountToken:  boolPtr(runnerSATokenAutomount),
 	}
 
 	// Workspace volume: only if persistence != persistenceNone OR repos are seeded
@@ -1164,6 +1172,26 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
 									Key:                  "MLFLOW_EXPERIMENT_NAME",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+						corev1.EnvVar{
+							Name: "MLFLOW_TRACKING_AUTH",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "MLFLOW_TRACKING_AUTH",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+						corev1.EnvVar{
+							Name: "MLFLOW_WORKSPACE",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "MLFLOW_WORKSPACE",
 									Optional:             boolPtr(true),
 								},
 							},
@@ -2416,6 +2444,13 @@ func regenerateRunnerToken(sessionNamespace, sessionName string, session *unstru
 				APIGroups: []string{""},
 				Resources: []string{"secrets"},
 				Verbs:     []string{"get"},
+			},
+			{
+				// Kubeflow-style MLflow workspace: server validates bearer token against Experiment CRs.
+				// Adjust apiGroup/resource if your distribution uses a different MLflow CRD.
+				APIGroups: []string{"mlflow.kubeflow.org"},
+				Resources: []string{"experiments"},
+				Verbs:     []string{"get", "list", "update"},
 			},
 		},
 	}

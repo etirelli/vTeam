@@ -69,6 +69,21 @@ class MLflowSessionTracer:
             logger.warning("MLflow: failed to set tracking URI or experiment: %s", e)
             return False
 
+        auth_mode = os.getenv("MLFLOW_TRACKING_AUTH", "").strip()
+        if auth_mode:
+            logger.info("MLflow: MLFLOW_TRACKING_AUTH=%s", auth_mode)
+        if os.getenv("MLFLOW_WORKSPACE", "").strip():
+            logger.info("MLflow: MLFLOW_WORKSPACE override is set")
+        if auth_mode in ("kubernetes", "kubernetes-namespaced"):
+            token_path = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+            if not os.path.isfile(token_path):
+                logger.warning(
+                    "MLflow: %s auth expects in-cluster service account token at %s (missing); "
+                    "ensure the runner pod mounts the session service account token",
+                    auth_mode,
+                    token_path,
+                )
+
         self._namespace = namespace
         self._mask_fn = mask_fn
         self._enabled = True

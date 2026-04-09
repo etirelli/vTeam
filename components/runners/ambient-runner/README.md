@@ -140,11 +140,15 @@ The workspace context prompt is built by `build_sdk_system_prompt()` in `prompts
 
 - `OBSERVABILITY_BACKENDS` - Comma-separated: `langfuse`, `mlflow`, or both (e.g. `langfuse,mlflow`). If unset, defaults to **`langfuse`** only so existing Langfuse behaviour is preserved.
 
-**MLflow GenAI tracing** (optional extra: `pip install 'ambient-runner[mlflow-observability]'`)
+**MLflow GenAI tracing** (optional extra: `pip install 'ambient-runner[mlflow-observability]'` — pins **`mlflow[kubernetes]>=3.11`** for cluster auth)
 
 - `MLFLOW_TRACING_ENABLED` - Must be `true` / `1` together with `mlflow` in `OBSERVABILITY_BACKENDS`
 - `MLFLOW_TRACKING_URI` - MLflow tracking server URI (e.g. `https://mlflow.example.com` or `file:./mlruns` for local tests)
 - `MLFLOW_EXPERIMENT_NAME` - Experiment name (default: `ambient-code-sessions`)
+- `MLFLOW_TRACKING_AUTH` - Optional. Set to **`kubernetes-namespaced`** on OpenShift AI / Kubeflow-style MLflow so the client adds **`Authorization: Bearer <SA JWT>`** and **`X-MLFLOW-WORKSPACE`** (from the pod namespace). Requires the **`kubernetes`** Python extra (included via `mlflow[kubernetes]`). The 3.11 client is expected to work against typical 3.9–3.10 era tracking servers; align versions with your platform if you hit protocol issues.
+- `MLFLOW_WORKSPACE` - Optional. Overrides the workspace sent as `X-MLFLOW-WORKSPACE` when using Kubernetes auth (otherwise the namespace file is used).
+
+On the cluster, when the operator copies `ambient-admin-mlflow-observability-secret`, it runs the runner pod as **`ambient-session-<session>`** with **service account token automount** enabled so MLflow can read `/var/run/secrets/kubernetes.io/serviceaccount/{token,namespace}`. The session `Role` includes **`get` / `list` / `update` on `experiments`** in API group **`mlflow.kubeflow.org`** (adjust RBAC if your MLflow operator uses a different API group).
 
 **OTLP export from MLflow** (no code changes — configure before the process creates spans; see [MLflow OTLP export](https://mlflow.org/docs/latest/genai/tracing/opentelemetry/export/)):
 
