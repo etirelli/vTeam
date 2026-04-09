@@ -643,3 +643,35 @@ func TestReplaceOrAppendEnvVarsPreservesValueFrom(t *testing.T) {
 		t.Errorf("ONLY_IN_EXTRA should be appended, got %+v", only)
 	}
 }
+
+func TestReplaceOrAppendEnvVarsProtectsOperatorManagedNames(t *testing.T) {
+	base := []corev1.EnvVar{
+		{Name: "USE_VERTEX", Value: "1"},
+		{Name: "CLAUDE_CODE_USE_VERTEX", Value: "1"},
+		{Name: "NORMAL_VAR", Value: "original"},
+	}
+	extra := []corev1.EnvVar{
+		{Name: "USE_VERTEX", Value: "0"},
+		{Name: "CLAUDE_CODE_USE_VERTEX", Value: "0"},
+		{Name: "NORMAL_VAR", Value: "overridden"},
+	}
+
+	out := replaceOrAppendEnvVars(base, extra)
+
+	for _, env := range out {
+		switch env.Name {
+		case "USE_VERTEX":
+			if env.Value != "1" {
+				t.Errorf("USE_VERTEX should be protected, got %q", env.Value)
+			}
+		case "CLAUDE_CODE_USE_VERTEX":
+			if env.Value != "1" {
+				t.Errorf("CLAUDE_CODE_USE_VERTEX should be protected, got %q", env.Value)
+			}
+		case "NORMAL_VAR":
+			if env.Value != "overridden" {
+				t.Errorf("NORMAL_VAR should be overridden, got %q", env.Value)
+			}
+		}
+	}
+}

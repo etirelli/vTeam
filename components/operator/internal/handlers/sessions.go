@@ -1584,11 +1584,20 @@ func appendNonConflictingEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []
 	return base
 }
 
+// operatorProtectedEnvVars lists env var names that the operator manages via
+// plain Value (not ValueFrom). These must not be overridden by user-supplied
+// spec.environmentVariables.
+var operatorProtectedEnvVars = map[string]struct{}{
+	"USE_VERTEX":            {},
+	"CLAUDE_CODE_USE_VERTEX": {},
+}
+
 // replaceOrAppendEnvVars merges extra into base: replaces existing entries by name,
 // or appends if the name does not exist. Used for the runner container where
 // user-provided overrides are intentional.
-// Entries in base that use ValueFrom (e.g. SecretKeyRef from the operator) are never
-// replaced or cleared so spec.environmentVariables cannot override platform-injected secrets.
+// Entries in base that use ValueFrom (e.g. SecretKeyRef from the operator) or that
+// are in operatorProtectedEnvVars are never replaced so spec.environmentVariables
+// cannot override platform-injected configuration.
 func replaceOrAppendEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []corev1.EnvVar {
 	for _, ev := range extra {
 		replaced := false
@@ -1597,6 +1606,10 @@ func replaceOrAppendEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []corev
 				continue
 			}
 			if base[i].ValueFrom != nil {
+				replaced = true
+				break
+			}
+			if _, protected := operatorProtectedEnvVars[base[i].Name]; protected {
 				replaced = true
 				break
 			}
