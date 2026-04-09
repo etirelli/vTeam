@@ -3,9 +3,9 @@
 Test privacy masking function for Langfuse observability.
 
 Validates that:
-1. User messages and assistant responses are redacted (all non-empty strings)
+1. User messages and assistant responses are redacted
 2. Usage metrics (tokens, costs) are preserved
-3. Metadata is traversed and string values inside it are redacted where not allow-listed
+3. Metadata fields are preserved
 4. Nested structures are handled correctly
 """
 
@@ -16,14 +16,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from ambient_runner.observability import _privacy_masking_function
+from ambient_runner.observability_privacy import (
+    privacy_mask_message_data,
+    privacy_mask_message_data_strict,
+    resolve_message_mask_fn,
+)
 
 
 def test_string_masking():
-    """Test that non-empty strings are redacted at the top level."""
-    assert _privacy_masking_function("") == ""
-    assert _privacy_masking_function("error") == "[REDACTED FOR PRIVACY]"
-    assert _privacy_masking_function("claude-3-5-sonnet") == "[REDACTED FOR PRIVACY]"
+    """Test that long strings are redacted."""
+    # Short strings (metadata) should pass through
+    assert _privacy_masking_function("claude-3-5-sonnet") == "claude-3-5-sonnet"
+    assert _privacy_masking_function("error") == "error"
 
+    # Long strings (likely user content) should be redacted
     long_text = "This is a user message that contains sensitive information about their business"
     assert _privacy_masking_function(long_text) == "[REDACTED FOR PRIVACY]"
 
@@ -64,6 +70,7 @@ def test_dict_content_masking():
     # Content should be redacted
     assert masked["content"] == "[REDACTED FOR PRIVACY]"
 
+    # Metadata should be preserved
     assert masked["role"] == "user"
     assert masked["model"] == "claude-3-5-sonnet"
     assert masked["turn"] == 1
@@ -100,6 +107,7 @@ def test_nested_structure():
     assert masked["usage"]["input_tokens"] == 500
     assert masked["usage"]["output_tokens"] == 250
 
+    # Metadata should be preserved
     assert masked["metadata"]["model"] == "claude-sonnet-4-5@20250929"
     assert masked["metadata"]["turn"] == 2
     assert masked["metadata"]["session_id"] == "session-123"
@@ -115,8 +123,10 @@ def test_list_masking():
 
     masked = _privacy_masking_function(messages)
 
-    assert masked[0] == "[REDACTED FOR PRIVACY]"
+    # Short string preserved
+    assert masked[0] == "Short metadata value"
 
+    # Long string redacted
     assert masked[1] == "[REDACTED FOR PRIVACY]"
 
     # Nested dict content redacted
@@ -144,7 +154,8 @@ def test_tool_tracking_data():
     assert masked["is_error"] is False
     assert masked["metadata"]["turn"] == 3
 
-    assert masked["input"]["file_path"] == "[REDACTED FOR PRIVACY]"
+    # Tool input (file path is short, preserved)
+    assert masked["input"]["file_path"] == "/workspace/src/main.py"
 
     # Tool output result redacted (long content)
     assert masked["output"]["result"] == "[REDACTED FOR PRIVACY]"
@@ -193,8 +204,6 @@ def test_real_world_trace():
 
     masked = _privacy_masking_function(trace)
 
-    assert masked["name"] == "[REDACTED FOR PRIVACY]"
-
     # User input redacted
     assert masked["input"][0]["content"] == "[REDACTED FOR PRIVACY]"
 
@@ -210,9 +219,48 @@ def test_real_world_trace():
     assert masked["usage_details"]["cache_read_input_tokens"] == 50
     assert masked["usage_details"]["cache_creation_input_tokens"] == 25
 
+    # Metadata fully preserved
     assert masked["metadata"]["turn"] == 1
     assert masked["metadata"]["session_id"] == "test-session-123"
+    assert masked["metadata"]["namespace"] == "prod-namespace"
+
+
+def test_strict_redacts_short_top_level_strings():
+    """LANGFUSE_MASK_MESSAGES=strict path redacts short strings (legacy does not)."""
+    assert privacy_mask_message_data_strict("error") == "[REDACTED FOR PRIVACY]"
+    assert privacy_mask_message_data_strict("") == ""
+
+
+def test_strict_redacts_strings_inside_metadata():
+    """Strict mode recurses into metadata; legacy leaves metadata unchanged."""
+    payload = {
+        "metadata": {
+            "turn": 1,
+            "session_id": "s-1",
+            "namespace": "prod-namespace",
+        }
+    }
+    masked = privacy_mask_message_data_strict(payload)
+    assert masked["metadata"]["turn"] == 1
+    assert masked["metadata"]["session_id"] == "s-1"
     assert masked["metadata"]["namespace"] == "[REDACTED FOR PRIVACY]"
+
+
+def test_resolve_message_mask_fn_selects_strict(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_MASK_MESSAGES", "strict")
+    fn = resolve_message_mask_fn()
+    assert fn is privacy_mask_message_data_strict
+
+
+def test_resolve_message_mask_fn_selects_legacy(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_MASK_MESSAGES", "true")
+    fn = resolve_message_mask_fn()
+    assert fn is privacy_mask_message_data
+
+
+def test_resolve_message_mask_fn_disabled(monkeypatch):
+    monkeypatch.setenv("LANGFUSE_MASK_MESSAGES", "false")
+    assert resolve_message_mask_fn() is None
 
 
 if __name__ == "__main__":
@@ -229,7 +277,10 @@ if __name__ == "__main__":
         ("Primitive types", test_primitive_types),
         ("Empty structures", test_empty_structures),
         ("Real-world trace", test_real_world_trace),
+        ("Strict short strings", test_strict_redacts_short_top_level_strings),
+        ("Strict metadata recurse", test_strict_redacts_strings_inside_metadata),
     ]
+    # resolve_message_mask_fn tests need pytest monkeypatch; skip in __main__ script mode
 
     passed = 0
     failed = 0
