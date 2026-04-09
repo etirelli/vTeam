@@ -581,6 +581,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	}
 
 	ambientMlflowObsSecretCopied := false
+	mlflowK8sAuth := false
 	mlflowTracingEnabled := os.Getenv("MLFLOW_TRACING_ENABLED") != "" && os.Getenv("MLFLOW_TRACING_ENABLED") != "0" && os.Getenv("MLFLOW_TRACING_ENABLED") != "false"
 
 	if mlflowTracingEnabled {
@@ -593,6 +594,9 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 				log.Printf("Warning: Failed to copy MLflow observability secret: %v. MLflow tracing will be disabled for this session.", err)
 			} else {
 				ambientMlflowObsSecretCopied = true
+				if authVal, ok := mlflowSecret.Data["MLFLOW_TRACKING_AUTH"]; ok && string(authVal) == "kubernetes-namespaced" {
+					mlflowK8sAuth = true
+				}
 				log.Printf("Successfully copied %s to %s", mlflowObsSecretName, sessionNamespace)
 			}
 		} else if !errors.IsNotFound(err) {
@@ -886,7 +890,7 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 	// Create the Pod directly (no Job wrapper for faster startup)
 	runnerSATokenAutomount := false
 	var runnerPodSAName string
-	if ambientMlflowObsSecretCopied {
+	if ambientMlflowObsSecretCopied && mlflowK8sAuth {
 		// MLflow MLFLOW_TRACKING_AUTH=kubernetes-namespaced reads token + namespace from
 		// /var/run/secrets/kubernetes.io/serviceaccount/ (requires automount + session SA).
 		runnerSATokenAutomount = true
@@ -1172,16 +1176,6 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 								SecretKeyRef: &corev1.SecretKeySelector{
 									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
 									Key:                  "MLFLOW_EXPERIMENT_NAME",
-									Optional:             boolPtr(true),
-								},
-							},
-						},
-						corev1.EnvVar{
-							Name: "MLFLOW_TRACKING_AUTH",
-							ValueFrom: &corev1.EnvVarSource{
-								SecretKeyRef: &corev1.SecretKeySelector{
-									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
-									Key:                  "MLFLOW_TRACKING_AUTH",
 									Optional:             boolPtr(true),
 								},
 							},
