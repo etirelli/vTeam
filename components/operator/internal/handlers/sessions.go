@@ -312,6 +312,10 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 			// Continue - session cleanup is still successful
 		}
 
+		if err := deleteAmbientMlflowObservabilitySecret(deleteCtx, sessionNamespace); err != nil {
+			log.Printf("Warning: Failed to cleanup ambient-admin-mlflow-observability-secret from %s: %v", sessionNamespace, err)
+		}
+
 		return nil
 	}
 
@@ -574,6 +578,30 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 		}
 	} else {
 		log.Printf("Langfuse disabled, skipping secret copy")
+	}
+
+	ambientMlflowObsSecretCopied := false
+	mlflowTracingEnabled := os.Getenv("MLFLOW_TRACING_ENABLED") != "" && os.Getenv("MLFLOW_TRACING_ENABLED") != "0" && os.Getenv("MLFLOW_TRACING_ENABLED") != "false"
+
+	if mlflowTracingEnabled {
+		const mlflowObsSecretName = "ambient-admin-mlflow-observability-secret"
+		if mlflowSecret, err := config.K8sClient.CoreV1().Secrets(operatorNamespace).Get(context.TODO(), mlflowObsSecretName, v1.GetOptions{}); err == nil {
+			log.Printf("Found %s in %s, copying to %s", mlflowObsSecretName, operatorNamespace, sessionNamespace)
+			copyCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := copySecretToNamespace(copyCtx, mlflowSecret, sessionNamespace, currentObj); err != nil {
+				log.Printf("Warning: Failed to copy MLflow observability secret: %v. MLflow tracing will be disabled for this session.", err)
+			} else {
+				ambientMlflowObsSecretCopied = true
+				log.Printf("Successfully copied %s to %s", mlflowObsSecretName, sessionNamespace)
+			}
+		} else if !errors.IsNotFound(err) {
+			log.Printf("Warning: Failed to check for %s in %s: %v. MLflow tracing may be disabled for this session.", mlflowObsSecretName, operatorNamespace, err)
+		} else {
+			log.Printf("Warning: MLFLOW_TRACING_ENABLED is set but %s not found in namespace %s. MLflow tracing will be disabled for this session.", mlflowObsSecretName, operatorNamespace)
+		}
+	} else {
+		log.Printf("MLflow tracing disabled, skipping MLflow observability secret copy")
 	}
 
 	// Create a Kubernetes Pod for this AgenticSession
@@ -1095,6 +1123,53 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 						},
 					)
 					log.Printf("Langfuse env vars configured via secretKeyRef for session %s", name)
+				}
+
+				const mlflowObsSecretName = "ambient-admin-mlflow-observability-secret"
+				if ambientMlflowObsSecretCopied {
+					base = append(base,
+						corev1.EnvVar{
+							Name: "MLFLOW_TRACING_ENABLED",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "MLFLOW_TRACING_ENABLED",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+						corev1.EnvVar{
+							Name: "MLFLOW_TRACKING_URI",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "MLFLOW_TRACKING_URI",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+						corev1.EnvVar{
+							Name: "MLFLOW_EXPERIMENT_NAME",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "MLFLOW_EXPERIMENT_NAME",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+						corev1.EnvVar{
+							Name: "OBSERVABILITY_BACKENDS",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "OBSERVABILITY_BACKENDS",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+					)
+					log.Printf("MLflow observability env vars configured via secretKeyRef for session %s", name)
 				}
 
 				// Add Vertex AI configuration only if enabled
@@ -1929,6 +2004,10 @@ func deletePodAndPerPodService(namespace, podName, sessionName string) error {
 		// Don't return error - this is a non-critical cleanup step
 	}
 
+	if err := deleteAmbientMlflowObservabilitySecret(deleteCtx, namespace); err != nil {
+		log.Printf("Failed to delete ambient-admin-mlflow-observability-secret from %s: %v", namespace, err)
+	}
+
 	// NOTE: PVC is kept for all sessions and only deleted via garbage collection
 	// when the session CR is deleted. This allows sessions to be restarted.
 
@@ -2156,6 +2235,58 @@ func deleteAmbientLangfuseSecret(ctx context.Context, namespace string) error {
 	err = config.K8sClient.CoreV1().Secrets(namespace).Delete(ctx, langfuseSecretName, v1.DeleteOptions{})
 	if err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("failed to delete %s secret: %w", langfuseSecretName, err)
+	}
+
+	return nil
+}
+
+// deleteAmbientMlflowObservabilitySecret deletes the copied MLflow observability secret from a
+// session namespace when no other active sessions need it (same rules as Langfuse secret).
+func deleteAmbientMlflowObservabilitySecret(ctx context.Context, namespace string) error {
+	const mlflowObsSecretName = "ambient-admin-mlflow-observability-secret"
+	secret, err := config.K8sClient.CoreV1().Secrets(namespace).Get(ctx, mlflowObsSecretName, v1.GetOptions{})
+	if err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("error checking for %s secret: %w", mlflowObsSecretName, err)
+	}
+
+	if _, ok := secret.Annotations[types.CopiedFromAnnotation]; !ok {
+		log.Printf("%s secret in namespace %s was not copied by operator, not deleting", mlflowObsSecretName, namespace)
+		return nil
+	}
+
+	gvr := types.GetAgenticSessionResource()
+	sessions, err := config.DynamicClient.Resource(gvr).Namespace(namespace).List(ctx, v1.ListOptions{})
+	if err != nil {
+		log.Printf("Warning: failed to list sessions in namespace %s, skipping secret deletion: %v", namespace, err)
+		return nil
+	}
+
+	activeCount := 0
+	for _, session := range sessions.Items {
+		status, _, _ := unstructured.NestedMap(session.Object, "status")
+		phase := ""
+		if status != nil {
+			if p, ok := status["phase"].(string); ok {
+				phase = p
+			}
+		}
+		if phase == "Running" || phase == "Creating" || phase == "Pending" {
+			activeCount++
+		}
+	}
+
+	if activeCount > 0 {
+		log.Printf("Skipping %s secret deletion in namespace %s: %d active session(s) may still need it", mlflowObsSecretName, namespace, activeCount)
+		return nil
+	}
+
+	log.Printf("Deleting copied %s secret from namespace %s (no active sessions)", mlflowObsSecretName, namespace)
+	err = config.K8sClient.CoreV1().Secrets(namespace).Delete(ctx, mlflowObsSecretName, v1.DeleteOptions{})
+	if err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("failed to delete %s secret: %w", mlflowObsSecretName, err)
 	}
 
 	return nil
