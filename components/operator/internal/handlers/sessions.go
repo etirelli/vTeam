@@ -1149,6 +1149,16 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 							},
 						},
 						corev1.EnvVar{
+							Name: "MLFLOW_TRACKING_AUTH",
+							ValueFrom: &corev1.EnvVarSource{
+								SecretKeyRef: &corev1.SecretKeySelector{
+									LocalObjectReference: corev1.LocalObjectReference{Name: mlflowObsSecretName},
+									Key:                  "MLFLOW_TRACKING_AUTH",
+									Optional:             boolPtr(true),
+								},
+							},
+						},
+						corev1.EnvVar{
 							Name: "MLFLOW_EXPERIMENT_NAME",
 							ValueFrom: &corev1.EnvVarSource{
 								SecretKeyRef: &corev1.SecretKeySelector{
@@ -1549,11 +1559,19 @@ func appendNonConflictingEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []
 // replaceOrAppendEnvVars merges extra into base: replaces existing entries by name,
 // or appends if the name does not exist. Used for the runner container where
 // user-provided overrides are intentional.
+// Env vars backed by ValueFrom (e.g. SecretKeyRef) are never overwritten — this
+// prevents user-supplied spec.environmentVariables from hijacking platform-managed
+// secrets (Langfuse, MLflow, etc.).
 func replaceOrAppendEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []corev1.EnvVar {
 	for _, ev := range extra {
 		replaced := false
 		for i := range base {
 			if base[i].Name == ev.Name {
+				if base[i].ValueFrom != nil {
+					// Platform-managed secret ref — do not allow override.
+					replaced = true
+					break
+				}
 				base[i].Value = ev.Value
 				replaced = true
 				break

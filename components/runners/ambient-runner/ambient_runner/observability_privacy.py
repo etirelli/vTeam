@@ -19,16 +19,13 @@ def resolve_message_mask_fn() -> Callable[[Any], Any] | None:
 def privacy_mask_message_data(data: Any, **kwargs: Any) -> Any:
     """Mask sensitive user inputs and outputs while preserving usage metrics."""
     if isinstance(data, str):
-        if len(data) > 50:
-            return "[REDACTED FOR PRIVACY]"
-        return data
+        return "[REDACTED FOR PRIVACY]"
     if isinstance(data, dict):
         masked: dict[str, Any] = {}
         for key, value in data.items():
             if key in (
                 "usage",
                 "usage_details",
-                "metadata",
                 "model",
                 "turn",
                 "input_tokens",
@@ -47,11 +44,10 @@ def privacy_mask_message_data(data: Any, **kwargs: Any) -> Any:
                 "level",
             ):
                 masked[key] = value
+            elif key == "metadata":
+                masked[key] = privacy_mask_message_data(value)
             elif key in ("content", "text", "input", "output", "prompt", "completion"):
-                if isinstance(value, str) and len(value) > 50:
-                    masked[key] = "[REDACTED FOR PRIVACY]"
-                else:
-                    masked[key] = privacy_mask_message_data(value)
+                masked[key] = privacy_mask_message_data(value)
             else:
                 masked[key] = privacy_mask_message_data(value)
         return masked
