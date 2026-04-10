@@ -422,6 +422,17 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 				_ = statusPatch.Apply()
 				_ = clearAnnotation(sessionNamespace, name, "ambient-code.io/desired-phase")
 				_ = clearAnnotation(sessionNamespace, name, "ambient-code.io/stop-requested-at")
+
+				// Cleanup copied observability secrets (may have been copied in a prior reconciliation)
+				cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cleanupCancel()
+				if err := deleteAmbientLangfuseSecret(cleanupCtx, sessionNamespace, name); err != nil {
+					log.Printf("Warning: Failed to cleanup langfuse secret from %s during Creating→Stopped: %v", sessionNamespace, err)
+				}
+				if err := deleteAmbientMlflowObservabilitySecret(cleanupCtx, sessionNamespace, name); err != nil {
+					log.Printf("Warning: Failed to cleanup mlflow secret from %s during Creating→Stopped: %v", sessionNamespace, err)
+				}
+
 				return nil
 			}
 
