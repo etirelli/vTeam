@@ -594,8 +594,11 @@ func handleAgenticSessionEvent(obj *unstructured.Unstructured) error {
 				log.Printf("Warning: Failed to copy MLflow observability secret: %v. MLflow tracing will be disabled for this session.", err)
 			} else {
 				ambientMlflowObsSecretCopied = true
-				if authVal, ok := mlflowSecret.Data["MLFLOW_TRACKING_AUTH"]; ok && string(authVal) == "kubernetes-namespaced" {
-					mlflowK8sAuth = true
+				if authVal, ok := mlflowSecret.Data["MLFLOW_TRACKING_AUTH"]; ok {
+					switch strings.TrimSpace(string(authVal)) {
+					case "kubernetes", "kubernetes-namespaced":
+						mlflowK8sAuth = true
+					}
 				}
 				log.Printf("Successfully copied %s to %s", mlflowObsSecretName, sessionNamespace)
 			}
@@ -1582,7 +1585,7 @@ func appendNonConflictingEnvVars(base []corev1.EnvVar, extra []corev1.EnvVar) []
 // plain Value (not ValueFrom). These must not be overridden by user-supplied
 // spec.environmentVariables.
 var operatorProtectedEnvVars = map[string]struct{}{
-	"USE_VERTEX":            {},
+	"USE_VERTEX":             {},
 	"CLAUDE_CODE_USE_VERTEX": {},
 }
 
