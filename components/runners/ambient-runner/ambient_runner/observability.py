@@ -440,28 +440,54 @@ class ObservabilityManager:
                 self._mlflow.start_turn(model, resolved_input)
             except Exception as e:
                 logging.warning("MLflow: start_turn failed: %s", e, exc_info=True)
+            else:
+                # Langfuse sets _last_trace_id when _current_turn_generation exists; for
+                # MLflow-only runs, persist the active MLflow trace id for middleware/feedback.
+                if not self._current_turn_generation:
+                    self._sync_last_trace_id_from_mlflow()
+
+    def _sync_last_trace_id_from_mlflow(self) -> None:
+        """Set _last_trace_id from MLflow when a turn span is active (MLflow-only path)."""
+        if not self.mlflow_tracing_active or self._mlflow is None:
+            return
+        if not self._mlflow.has_active_turn:
+            return
+        try:
+            import mlflow
+
+            tid = mlflow.get_active_trace_id()
+            if tid:
+                self._last_trace_id = tid
+        except Exception as e:
+            logging.debug("MLflow: could not read active trace id: %s", e)
 
     def get_current_trace_id(self) -> str | None:
         """Get the current turn's trace ID for feedback association.
 
         Returns:
-            The Langfuse trace ID if a turn is active, None otherwise.
+            Langfuse trace ID when a Langfuse turn is active; otherwise the MLflow
+            active trace ID when MLflow tracing is on and a turn span is open.
         """
-        if not self._current_turn_generation:
-            return None
+        if self._current_turn_generation:
+            try:
+                return getattr(self._current_turn_generation, "trace_id", None)
+            except Exception:
+                return None
+        if self.mlflow_tracing_active and self._mlflow is not None and self._mlflow.has_active_turn:
+            try:
+                import mlflow
 
-        # The generation object has a trace_id attribute
-        try:
-            return getattr(self._current_turn_generation, "trace_id", None)
-        except Exception:
-            return None
+                return mlflow.get_active_trace_id()
+            except Exception:
+                return None
+        return None
 
     @property
     def last_trace_id(self) -> str | None:
-        """Most recent Langfuse trace ID (persists after turn ends).
+        """Most recent trace ID for the active backends (persists after turn ends).
 
-        Used by the feedback endpoint to attach scores to the correct trace
-        without requiring the backend to scan the event log.
+        Langfuse or MLflow depending on configuration; used by the feedback endpoint
+        and AG-UI trace events when the runner owns the correlation id.
         """
         return self._last_trace_id
 
