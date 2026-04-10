@@ -68,13 +68,14 @@ from ambient_runner.platform.security_utils import (
     with_sync_timeout,
 )
 
+# Alias for tests and legacy imports
+_privacy_masking_function = privacy_mask_message_data
+
+
 def _runner_type_slug() -> str:
     """Stable label from ``RUNNER_TYPE`` (see ``main.BRIDGE_REGISTRY``)."""
     return os.getenv("RUNNER_TYPE", "claude-agent-sdk").strip().lower() or "unknown"
 
-
-# Alias for tests and legacy imports
-_privacy_masking_function = privacy_mask_message_data
 
 # Langfuse / MLflow turn trace name — not tied to a single vendor SDK.
 TURN_TRACE_NAME = "llm_interaction"
@@ -82,7 +83,7 @@ SESSION_METRICS_SPAN_NAME = "Session Metrics"
 # Metadata ``source`` for session-level metric spans (Langfuse + MLflow).
 SESSION_METRICS_SOURCE = "ambient-runner-metrics"
 
-# Canonical token key names used across usage dicts from agent SDKs.
+# Canonical token key names used across usage dicts from the Claude Agent SDK.
 _TOKEN_KEYS = (
     "input_tokens",
     "output_tokens",
@@ -496,7 +497,11 @@ class ObservabilityManager:
                 return getattr(self._current_turn_generation, "trace_id", None)
             except Exception:
                 return None
-        if self.mlflow_tracing_active and self._mlflow is not None and self._mlflow.has_active_turn:
+        if (
+            self.mlflow_tracing_active
+            and self._mlflow is not None
+            and self._mlflow.has_active_turn
+        ):
             try:
                 import mlflow
 

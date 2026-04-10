@@ -95,7 +95,9 @@ class MLflowSessionTracer:
 
         self._namespace = namespace
         self._mask_fn = mask_fn
-        self._runner_type = (runner_type or os.getenv("RUNNER_TYPE", "claude-agent-sdk") or "").strip().lower() or "unknown"
+        self._runner_type = (
+            runner_type or os.getenv("RUNNER_TYPE", "claude-agent-sdk") or ""
+        ).strip().lower() or "unknown"
         self._enabled = True
         logger.info(
             "MLflow: session tracing enabled (session_id=%s, experiment=%s)",
