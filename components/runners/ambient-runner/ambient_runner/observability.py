@@ -1,36 +1,19 @@
 """
-Observability manager for Claude Code runner - hybrid Langfuse integration.
+Observability manager for ambient-runner — Langfuse and/or MLflow.
 
-Provides Langfuse LLM observability for Claude sessions with trace structure:
+Works across runner backends (Claude Agent SDK, Gemini CLI, etc.). Span names are
+vendor-neutral; ``RUNNER_TYPE`` tags traces for the active bridge.
 
-1. Turn Traces (top-level generations):
-   - ONE trace per turn (SDK sends multiple AssistantMessages during streaming, but guard prevents duplicates)
-   - Named: "claude_interaction" (turn number stored in metadata)
-   - First AssistantMessage creates trace, subsequent ones ignored until end_turn() clears it
-   - Final trace contains authoritative turn number and usage data from ResultMessage
-   - Canonical format with separate cache token tracking for accurate cost
-   - All traces grouped by session_id via propagate_attributes()
+1. Turn traces (top-level generations):
+   - ONE trace per turn; named ``llm_interaction`` (turn in metadata)
+   - Grouped by session_id via propagate_attributes()
 
-2. Tool Spans (observations within turn traces):
-   - Named: tool_Read, tool_Write, tool_Bash, etc.
-   - Shows tool execution in real-time
-   - NO usage/cost data (prevents inflation from SDK's cumulative metrics)
-   - Child observations of their parent turn trace
+2. Tool spans: tool_<name>, no usage on tool spans (avoids double-counting)
 
-Architecture:
-- Session-based grouping via propagate_attributes() with session_id and user_id
-- Each turn creates ONE independent trace (not nested under session)
-- Langfuse automatically aggregates tokens and costs across all traces with same session_id
-- Filter by session_id, user_id, model, or metadata.turn in Langfuse UI
-- Sessions can be paused/resumed: each turn creates a trace regardless of session lifecycle
-
-Trace Hierarchy:
-claude_interaction (trace - generation, metadata: {turn: 1})
-├── tool_Read (observation - span)
-└── tool_Write (observation - span)
-
-claude_interaction (trace - generation, metadata: {turn: 2})
-└── tool_Bash (observation - span)
+Trace hierarchy (conceptual):
+llm_interaction (generation, metadata: {turn: 1})
+├── tool_Read
+└── tool_Write
 
 Usage Format:
 {
@@ -64,7 +47,18 @@ from ambient_runner.platform.security_utils import (
     with_sync_timeout,
 )
 
-# Canonical token key names used across usage dicts from the Claude Agent SDK.
+def _runner_type_slug() -> str:
+    """Stable label from ``RUNNER_TYPE`` (see ``main.BRIDGE_REGISTRY``)."""
+    return os.getenv("RUNNER_TYPE", "claude-agent-sdk").strip().lower() or "unknown"
+
+
+# Langfuse / MLflow turn trace name — not tied to a single vendor SDK.
+TURN_TRACE_NAME = "llm_interaction"
+SESSION_METRICS_SPAN_NAME = "Session Metrics"
+# Metadata ``source`` for session-level metric spans (Langfuse + MLflow).
+SESSION_METRICS_SOURCE = "ambient-runner-metrics"
+
+# Canonical token key names used across usage dicts from agent SDKs.
 _TOKEN_KEYS = (
     "input_tokens",
     "output_tokens",
@@ -79,7 +73,7 @@ def is_langfuse_enabled() -> bool:
 
 
 class ObservabilityManager:
-    """Manages Langfuse observability for Claude sessions."""
+    """Manages Langfuse and/or MLflow observability for agent sessions."""
 
     def __init__(self, session_id: str, user_id: str, user_name: str):
         """Initialize observability manager.
@@ -184,6 +178,7 @@ class ObservabilityManager:
                     workflow_branch=workflow_branch,
                     workflow_path=workflow_path,
                     mask_fn=mask_fn,
+                    runner_type=_runner_type_slug(),
                 )
             except Exception as e:
                 logging.warning(
@@ -260,7 +255,7 @@ class ObservabilityManager:
                 "initial_prompt": prompt[:200] if len(prompt) > 200 else prompt,
             }
 
-            tags = ["claude-code", f"namespace:{namespace}"]
+            tags = [f"runner:{_runner_type_slug()}", f"namespace:{namespace}"]
 
             if model:
                 sanitized_model = sanitize_model_name(model)
@@ -350,7 +345,7 @@ class ObservabilityManager:
 
     @staticmethod
     def _extract_assistant_text(message: Any) -> str:
-        """Extract assistant text from a Claude SDK message (or best-effort without SDK)."""
+        """Extract assistant text from an agent SDK message (or best-effort without SDK)."""
         try:
             from claude_agent_sdk import TextBlock
         except ImportError:
@@ -420,10 +415,10 @@ class ObservabilityManager:
                 self._current_turn_ctx = (
                     self.langfuse_client.start_as_current_observation(
                         as_type="generation",
-                        name="claude_interaction",
+                        name=TURN_TRACE_NAME,
                         input=input_content,
                         model=model,
-                        metadata={},
+                        metadata={"runner_type": _runner_type_slug()},
                     )
                 )
                 self._current_turn_generation = self._current_turn_ctx.__enter__()
@@ -494,7 +489,7 @@ class ObservabilityManager:
 
         Args:
             turn_count: Current turn number (from SDK's authoritative num_turns in ResultMessage)
-            message: AssistantMessage from Claude SDK
+            message: Assistant message from the active agent SDK
             usage: Usage dict from ResultMessage with input_tokens, output_tokens, cache tokens, etc.
         """
         if not self.langfuse_client and not self.mlflow_tracing_active:
@@ -870,7 +865,8 @@ class ObservabilityManager:
             scores = metric.to_flat_scores()
 
             span_metadata = {
-                "source": "claude-code-metrics",
+                "source": SESSION_METRICS_SOURCE,
+                "runner_type": _runner_type_slug(),
                 "session_id": self.session_id,
                 "user_id": self.user_id,
                 "namespace": self.namespace,
@@ -882,7 +878,7 @@ class ObservabilityManager:
 
             if self.langfuse_client:
                 with self.langfuse_client.start_as_current_span(
-                    name="Claude Code - Session Metrics",
+                    name=SESSION_METRICS_SPAN_NAME,
                     input={
                         "session_id": self.session_id,
                         "user_id": self.user_id,
