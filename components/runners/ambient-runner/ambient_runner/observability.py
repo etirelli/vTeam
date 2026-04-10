@@ -55,14 +55,15 @@ from ambient_runner.observability_privacy import (
     resolve_message_mask_fn,
 )
 
-# Alias for tests and legacy imports
-_privacy_masking_function = privacy_mask_message_data
 from ambient_runner.platform.security_utils import (
     sanitize_exception_message,
     sanitize_model_name,
     validate_and_sanitize_for_logging,
     with_sync_timeout,
 )
+
+# Alias for tests and legacy imports
+_privacy_masking_function = privacy_mask_message_data
 
 # Canonical token key names used across usage dicts from the Claude Agent SDK.
 _TOKEN_KEYS = (

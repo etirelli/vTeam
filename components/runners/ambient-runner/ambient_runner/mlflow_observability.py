@@ -61,7 +61,9 @@ class MLflowSessionTracer:
 
         try:
             mlflow.set_tracking_uri(tracking_uri)
-            exp_name = os.getenv("MLFLOW_EXPERIMENT_NAME", "ambient-code-sessions").strip()
+            exp_name = os.getenv(
+                "MLFLOW_EXPERIMENT_NAME", "ambient-code-sessions"
+            ).strip()
             if not exp_name:
                 exp_name = "ambient-code-sessions"
             mlflow.set_experiment(exp_name)
@@ -92,7 +94,13 @@ class MLflowSessionTracer:
             self.session_id,
             exp_name,
         )
-        _ = (prompt, model, workflow_url, workflow_branch, workflow_path)  # reserved for tags
+        _ = (
+            prompt,
+            model,
+            workflow_url,
+            workflow_branch,
+            workflow_path,
+        )  # reserved for tags
         return True
 
     def _apply_mask(self, value: Any) -> Any:
