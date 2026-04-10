@@ -2,20 +2,43 @@
 Observability manager for ambient-runner — Langfuse and/or MLflow.
 
 Works across runner backends (Claude Agent SDK, Gemini CLI, etc.). Span names are
-vendor-neutral; ``RUNNER_TYPE`` tags traces for the active bridge.
+vendor-neutral; ``RUNNER_TYPE`` tags traces for the active bridge. When both
+backends are enabled, the same turn/tool boundaries are mirrored into MLflow.
 
 1. Turn traces (top-level generations):
-   - ONE trace per turn; named ``llm_interaction`` (turn in metadata)
-   - Grouped by session_id via propagate_attributes()
+   - ONE trace per turn (SDK may send multiple assistant messages during streaming;
+     a guard prevents duplicate traces for the same turn)
+   - Named ``llm_interaction`` (turn number stored in metadata)
+   - First assistant message for a turn creates the trace; later ones are ignored
+     until ``end_turn()`` clears the active turn
+   - Final trace update contains the authoritative turn number and usage from the
+     SDK result message (e.g. ``ResultMessage``)
+   - Canonical usage format with separate cache token fields for accurate cost
+   - Traces grouped by ``session_id`` via ``propagate_attributes()`` (Langfuse);
+     MLflow uses the same session/user tags on spans
 
-2. Tool spans: tool_<name>, no usage on tool spans (avoids double-counting)
+2. Tool spans (within the current turn trace):
+   - Named ``tool_<name>`` (e.g. ``tool_Read``, ``tool_Write``, ``tool_Bash``)
+   - Reflect tool execution in real time
+   - NO usage/cost on tool spans (avoids double-counting vs turn-level usage)
+
+Architecture:
+- Session-based grouping via ``propagate_attributes()`` with ``session_id`` and
+  ``user_id`` (Langfuse); MLflow sets equivalent attributes/tags on spans
+- Each turn is ONE independent trace (not nested under a single parent session trace)
+- Langfuse aggregates tokens/costs across traces sharing ``session_id``; filter by
+  ``session_id``, ``user_id``, model, or ``metadata.turn`` in the Langfuse UI
+- Sessions can be paused/resumed: each turn still gets a trace when it runs
 
 Trace hierarchy (conceptual):
 llm_interaction (generation, metadata: {turn: 1})
-├── tool_Read
-└── tool_Write
+├── tool_Read (observation / span)
+└── tool_Write (observation / span)
 
-Usage Format:
+llm_interaction (generation, metadata: {turn: 2})
+└── tool_Bash (observation / span)
+
+Usage format (turn-level):
 {
     "input": int,  # Regular input tokens
     "output": int,  # Output tokens
